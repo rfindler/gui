@@ -559,8 +559,10 @@
         (or (and (path? id)
                  (path? filename)
                  (or (equal? id filename) ;; "fast path" check
-                     (equal? (normal-case-path-normalize-path/f (get-filename))
-                             (normal-case-path-normalize-path/f id))))
+                     (let ([n-fn (normal-case-path-normalize-path/f filename)]
+                           [n-id (normal-case-path-normalize-path/f id)])
+                       (and n-fn n-id
+                            (equal? n-fn n-id)))))
             (and (symbol? port-name-identifier)
                  (symbol? id)
                  (equal? port-name-identifier id)))))
