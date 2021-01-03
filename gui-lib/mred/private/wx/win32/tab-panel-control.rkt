@@ -4,6 +4,7 @@
          (only-in racket/gui/base normal-control-font canvas%)
          racket/class
          mred/private/panel-wob)
+(module+ test (require rackunit))
 
 ;(define (white-on-black-panel-scheme?) #f)
 
@@ -144,7 +145,9 @@
           (define mouse-over?
             (and (not clicked-in)
                  (equal? i mouse-over)))
-          (draw-ith-item i (natural-left-position i)
+          (define ith-offset (find-ith-offset i))
+          (draw-ith-item i
+                         (natural-left-position (+ i ith-offset))
                          mouse-over?
                          (and mouse-over? mouse-over-close?)
                          #f)))
@@ -155,9 +158,9 @@
       ;; 3. draw the one that is being dragged (so it shows up on top)
       (when clicked-in
         (cond
-          [(and clicked-in-offset mouse-down-x)
+          [clicked-in-offset
            (draw-ith-item clicked-in
-                          (- mouse-down-x clicked-in-offset)
+                          (get-left-edge-of-moving-tab)
                           #t
                           #f
                           #f)]
@@ -322,10 +325,38 @@
          tab-mouse-over-close-circle-color]))
 
     ;; -----
-    ;; sizes
+    ;; sizes and positions
     
     (define/private (natural-left-position i)
       (* i (width-of-tab)))
+
+    ;; determines the delta (0, -1, +1) for the `ith` tab
+    ;; due to some other tab being dragged around
+    ;; pre: i ≠ clicked-in
+    (define/private (find-ith-offset i)
+      (cond
+        [(and clicked-in clicked-in-offset)
+         (define i-left (natural-left-position i))
+         (define i-right (+ i-left (width-of-tab)))
+         (define i-middle (/ (+ i-left i-right) 2))
+         (define left-edge-of-moving-tab (get-left-edge-of-moving-tab))
+         (define right-edge-of-moving-tab (+ left-edge-of-moving-tab (width-of-tab)))
+         (cond
+           [(< i clicked-in)
+            (if (left-edge-of-moving-tab . < . i-middle)
+                +1
+                0)]
+           [(< clicked-in i)
+            (if (right-edge-of-moving-tab . > . i-middle)
+                -1
+                0)]
+           [else 0])]
+        [else 0]))
+
+    (define/private (get-left-edge-of-moving-tab)
+      (ensure-in-bounds (natural-left-position 0)
+                        (- mouse-down-x clicked-in-offset)
+                        (natural-left-position (- (number-of-items) 1))))
     
     (define/private (width-of-tab)
       (define-values (cw ch) (get-client-size))
@@ -419,13 +450,20 @@
     (send color blue)
     0))
 
+(define (ensure-in-bounds low x high)
+  (max (min x high) low))
+(module+ test
+  (check-equal? (ensure-in-bounds 0 1 10) 1)
+  (check-equal? (ensure-in-bounds 0 8 10) 8)
+  (check-equal? (ensure-in-bounds 0 -1 10) 0)
+  (check-equal? (ensure-in-bounds 0 11 10) 10))
+
 (define (delete-item/hash items n)
   (for ([i (in-range (+ n 1) (hash-count items))])
     (hash-set! items (- i 1) (hash-ref items i)))
   (hash-remove! items (- (hash-count items) 1)))
 
 (module+ test
-  (require rackunit)
   (let ()
     (define ht (make-hash (list (cons 0 "a"))))
     (delete-item/hash ht 0)
@@ -463,7 +501,6 @@
 
 (module+ main
   (require (only-in racket/gui/base frame% canvas%))
-  
   (define f (new frame% [label ""] [width 300] [height 80]))
   (define tpc (new tab-panel-control% [parent f]
                    [choices '("a" "b" "abcdefghijklmnopqrstuvwxyz" "d" "e")]))
