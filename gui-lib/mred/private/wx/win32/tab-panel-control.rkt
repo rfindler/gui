@@ -360,7 +360,16 @@
     
     (define/private (width-of-tab)
       (define-values (cw ch) (get-client-size))
-      (/ cw (number-of-items)))
+      (define dc (get-dc))
+      (define shrinking-required-size (/ cw (number-of-items)))
+
+      ;; this is the maximum size that a tab will ever be
+      (define unconstrained-tab-size (* (send (send dc get-font) get-point-size) 12))
+      (cond
+        [(< shrinking-required-size unconstrained-tab-size)
+         shrinking-required-size]
+        [else
+         unconstrained-tab-size]))
 
     (define/private (update-min-width)
       (define items (number-of-items))
