@@ -463,6 +463,7 @@
 
 (module+ main
   (require (only-in racket/gui/base frame% canvas%))
+  
   (define f (new frame% [label ""] [width 300] [height 80]))
   (define tpc (new tab-panel-control% [parent f]
                    [choices '("a" "b" "abcdefghijklmnopqrstuvwxyz" "d" "e")]))
