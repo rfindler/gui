@@ -101,7 +101,7 @@
     ;; enter and leave events)
     (define mouse-down-x #f)
     (define mouse-down-y #f)
-    (define/private (set-mouse-xy x y)
+    (define/private (set-mouse-down-xy x y)
       (unless (and (equal? mouse-down-x x)
                    (equal? mouse-down-y y))
         (set! mouse-down-x x)
@@ -141,42 +141,56 @@
 
       ;; 1. draw the items that aren't being dragged
       (for ([i (in-range (number-of-items))])
-        (unless (equal? i clicked-in)
-          (define mouse-over?
-            (and (not clicked-in)
-                 (equal? i mouse-over)))
+        (define skip-this-drawing-because-it-is-moving?
+          (and (equal? i clicked-in)
+               (number? clicked-in-offset)))
+        (unless skip-this-drawing-because-it-is-moving?
           (define ith-offset (find-ith-offset i))
           (draw-ith-item i
-                         (natural-left-position (+ i ith-offset))
-                         mouse-over?
-                         (and mouse-over? mouse-over-close?)
-                         #f)))
+                         (natural-left-position (+ i ith-offset)))))
 
       ;; 2.
       (draw-lines-between-items)
 
       ;; 3. draw the one that is being dragged (so it shows up on top)
-      (when clicked-in
-        (cond
-          [clicked-in-offset
-           (draw-ith-item clicked-in
-                          (get-left-edge-of-moving-tab)
-                          #t
-                          #f
-                          #f)]
-          [else
-           ;; here we need to do button-like things
-           (void)])))
+      (when (and clicked-in (not clicked-in-offset))
+        (draw-ith-item clicked-in
+                       (get-left-edge-of-moving-tab))))
 
     (define/private (draw-lines-between-items)
       (define dc (get-dc))
-      (send dc set-pen (get-text-and-close-foreground-color #f #f) 1 'solid)
+      (send dc set-pen (text-and-close-icon-dim-color) 1 'solid)
       (define-values (cw ch) (get-client-size))
       (for ([i (in-range 1 (number-of-items))])
         (define x (natural-left-position i))
         (send dc draw-line x vertical-item-margin x (- ch vertical-item-margin))))
 
-    (define/private (draw-ith-item i x-start mouse-over? mouse-over-close? mouse-down?)
+    (define/private (draw-ith-item i x-start)
+      (define tab-background-color
+        (cond
+          [(equal? selection i) (selected-tab-color)]
+          [(or (equal? mouse-over i) (equal? clicked-in i)) (mouse-over-tab-color)]
+          [else (natural-tab-color)]))
+      (define text-and-close-foreground-color
+        (cond
+          [(equal? selection i) (text-and-close-icon-bright-color)]
+          [else (text-and-close-icon-dim-color)]))
+      (define close-circle-color
+        (cond
+          [(and (equal? clicked-in i) (not clicked-in-offset))
+           (mouse-down-over-close-circle-color)]
+          [(and (equal? mouse-over i) mouse-over-close?)
+           (mouse-over-close-circle-color)]
+          [else tab-background-color]))
+      (draw-ith-item/colors i x-start
+                            tab-background-color
+                            text-and-close-foreground-color
+                            close-circle-color))
+    
+    (define/private (draw-ith-item/colors i x-start
+                                          tab-background-color
+                                          text-and-close-foreground-color
+                                          close-circle-color)
       (define dc (get-dc))
       (define lab (get-item i))
       (define lab-space (- (width-of-tab)
@@ -185,7 +199,7 @@
                            size-of-close-icon-circle))
       (define-values (cw ch) (get-client-size))
 
-      (send dc set-brush (get-tab-background-color mouse-over? mouse-down?) 'solid)
+      (send dc set-brush tab-background-color 'solid)
       (send dc set-pen "black" 1 'transparent)
       (send dc draw-rectangle x-start 0 (width-of-tab) ch)
       
@@ -194,13 +208,16 @@
             0
             lab-space
             ch)
-      (send dc set-text-foreground (get-text-and-close-foreground-color mouse-over? mouse-down?))
+      (send dc set-text-foreground text-and-close-foreground-color)
       (send dc draw-text lab (+ x-start horizontal-item-margin) vertical-item-margin)
       (send dc set-clipping-region #f)
-      (maybe-draw-fade-at-edge lab lab-space x-start mouse-over? mouse-down?)
-      (draw-close-icon x-start mouse-over? mouse-over-close? mouse-down?))
+      (maybe-draw-fade-at-edge lab lab-space x-start tab-background-color)
+      (draw-close-icon x-start
+                       tab-background-color
+                       text-and-close-foreground-color
+                       close-circle-color))
     
-    (define/private (maybe-draw-fade-at-edge lab lab-space x-start mouse-over? mouse-down?)
+    (define/private (maybe-draw-fade-at-edge lab lab-space x-start tab-background-color)
       (define dc (get-dc))
       (define-values (cw ch) (get-client-size))
       (define-values (tw th td ta) (send dc get-text-extent lab))
@@ -211,8 +228,8 @@
           (define old-brush (send dc get-brush))
           (define old-pen (send dc get-pen))
           (define gradient-stops
-            (list (list 0 (make-transparent (get-tab-background-color mouse-over? mouse-down?)))
-                  (list 1 (get-tab-background-color mouse-over? mouse-down?))))
+            (list (list 0 (make-transparent tab-background-color))
+                  (list 1 tab-background-color)))
           (send dc set-brush
                 (new brush%
                      [gradient
@@ -231,21 +248,24 @@
           (send dc set-pen old-pen)
           (send dc set-brush old-brush))))
 
-    (define/private (draw-close-icon x-start mouse-over? mouse-over-close? mouse-down?)
+    (define/private (draw-close-icon x-start
+                                     tab-background-color
+                                     text-and-close-foreground-color
+                                     close-circle-color)
       (define dc (get-dc))
       (define close-icon-start (+ x-start (get-start-of-cross-x-offset)))
       (define-values (cw ch) (get-client-size))
       (define cx (+ close-icon-start (/ size-of-close-icon-circle 2)))
       (define cy (/ ch 2))
-      (when mouse-over-close?
-        (send dc set-brush (get-mouse-over-close-circle-color) 'solid)
+      (when close-circle-color
+        (send dc set-brush close-circle-color 'solid)
         (send dc set-pen "black" 1 'transparent)
         (send dc draw-ellipse
               (- cx (/ size-of-close-icon-circle 2))
               (- cy (/ size-of-close-icon-circle 2))
               size-of-close-icon-circle
               size-of-close-icon-circle))
-      (send dc set-pen (get-text-and-close-foreground-color mouse-over? mouse-down?) 1 'solid)
+      (send dc set-pen text-and-close-foreground-color 1 'solid)
       (send dc draw-line
             (- cx (/ size-of-close-icon-x 2))
             (- cy (/ size-of-close-icon-x 2))
@@ -265,7 +285,7 @@
       (cond
         [(send evt leaving?)
          (set-mouse-over #f #f)
-         (set-mouse-xy #f #f)
+         (set-mouse-down-xy #f #f)
          (set-mouse-entered? #f)
          (set-clicked-in #f #f)]
         [(send evt entering?)
@@ -276,53 +296,14 @@
           (mouse->tab (send evt get-x) (send evt get-y)))
         (cond
           [(send evt button-down?)
-           (set-mouse-xy (send evt get-x) (send evt get-y))
+           (set-mouse-down-xy (send evt get-x) (send evt get-y))
            (set-clicked-in mouse-over (and (not mouse-over-close?) mx-offset-in-tab))]
           [(send evt dragging?)
-           (set-mouse-xy (send evt get-x) (send evt get-y))]
+           (set-mouse-down-xy (send evt get-x) (send evt get-y))]
           [(send evt button-up?)
-           (set-mouse-xy #f #f)
-           (set-clicked-in #f #f)]
-          [else
-           (set-mouse-over mouse-over mouse-over-close?)])))
-    
-    ;; -------
-    ;; colors
-    
-    (define/private (get-text-and-close-foreground-color mouse-over? mouse-down?)
-      (cond
-        [(white-on-black-panel-scheme?)
-         (cond
-           [mouse-down?
-            wob-text-and-close-icon-down-color]
-           [else
-            wob-text-and-close-icon-color])]
-        [else
-         (cond
-           [mouse-down?
-            tab-text-and-close-icon-down-color]
-           [else
-            tab-text-and-close-icon-color])]))
-
-    (define/private (get-tab-background-color mouse-over? mouse-down?)
-      (cond
-        [(white-on-black-panel-scheme?)
-         (cond
-           [(and mouse-over? mouse-down?) selected-wob-color]
-           [mouse-over? mouse-over-wob-color]
-           [else natural-wob-color])]
-        [else
-         (cond
-           [(and mouse-over? mouse-down?) selected-tab-color]
-           [mouse-over? mouse-over-tab-color]
-           [else natural-tab-color])]))
-
-    (define/private (get-mouse-over-close-circle-color)
-      (cond
-        [(white-on-black-panel-scheme?)
-         wob-mouse-over-close-circle-color]
-        [else
-         tab-mouse-over-close-circle-color]))
+           (set-mouse-down-xy #f #f)
+           (set-clicked-in #f #f)])
+        (set-mouse-over mouse-over mouse-over-close?)))
 
     ;; -----
     ;; sizes and positions
@@ -432,25 +413,25 @@
 ;; color constants
 (define shade-delta 16)
 (define shade-start 20)
-(define (make-color shade-count dark?)
-  (define offset (+ shade-start (* shade-delta shade-count)))
-  (define c (if dark? offset (- 255 offset)))
-  (make-object color% c c c))
+(define colors (make-hash))
+(define (get-a-color shade-count dark?)
+  (unless (hash-ref colors shade-count #f)
+    (define offset (+ shade-start (* shade-delta shade-count)))
+    (define 255-of (- 255 offset))
+    (hash-set! colors
+               shade-count
+               (cons (make-object color% offset offset offset)
+                     (make-object color% 255-of 255-of 255-of))))
+  (define pr (hash-ref colors shade-count))
+  (if dark? (car pr) (cdr pr)))
 
-(define natural-tab-color (make-color 1 #f))
-(define natural-wob-color (make-color 1 #t))
-(define mouse-over-tab-color (make-color 2 #f))
-(define mouse-over-wob-color (make-color 2 #t))
-(define selected-tab-color (make-color 3 #f))
-(define selected-wob-color (make-color 3 #t))
-
-(define wob-text-and-close-icon-down-color (make-color 1 #f))
-(define wob-text-and-close-icon-color (make-color 2 #f))
-(define tab-text-and-close-icon-down-color (make-color 1 #t))
-(define tab-text-and-close-icon-color (make-color 2 #t))
-
-(define tab-mouse-over-close-circle-color (make-color 6 #f))
-(define wob-mouse-over-close-circle-color (make-color 6 #t))
+(define (natural-tab-color) (get-a-color 1 (white-on-black-panel-scheme?)))
+(define (mouse-over-tab-color) (get-a-color 2 (white-on-black-panel-scheme?)))
+(define (selected-tab-color) (get-a-color 3 (white-on-black-panel-scheme?)))
+(define (text-and-close-icon-dim-color) (get-a-color 3 (not (white-on-black-panel-scheme?))))
+(define (text-and-close-icon-bright-color) (get-a-color 1 (not (white-on-black-panel-scheme?))))
+(define (mouse-over-close-circle-color) (get-a-color 6 (white-on-black-panel-scheme?)))
+(define (mouse-down-over-close-circle-color) (get-a-color 8 (white-on-black-panel-scheme?)))
 
 (define (make-transparent color)
   (make-object color%
