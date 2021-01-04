@@ -153,7 +153,7 @@
       (draw-lines-between-items)
 
       ;; 3. draw the one that is being dragged (so it shows up on top)
-      (when (and clicked-in (not clicked-in-offset))
+      (when (and clicked-in clicked-in-offset)
         (draw-ith-item clicked-in
                        (get-left-edge-of-moving-tab))))
 
@@ -297,13 +297,17 @@
         (cond
           [(send evt button-down?)
            (set-mouse-down-xy (send evt get-x) (send evt get-y))
-           (set-clicked-in mouse-over (and (not mouse-over-close?) mx-offset-in-tab))]
+           (set-clicked-in mouse-over (and (not mouse-over-close?) mx-offset-in-tab))
+           (set-mouse-over #f #f)]
           [(send evt dragging?)
-           (set-mouse-down-xy (send evt get-x) (send evt get-y))]
+           (set-mouse-down-xy (send evt get-x) (send evt get-y))
+           (set-mouse-over #f #f)]
           [(send evt button-up?)
            (set-mouse-down-xy #f #f)
-           (set-clicked-in #f #f)])
-        (set-mouse-over mouse-over mouse-over-close?)))
+           (set-clicked-in #f #f)
+           (set-mouse-over mouse-over mouse-over-close?)]
+          [else
+           (set-mouse-over mouse-over mouse-over-close?)])))
 
     ;; -----
     ;; sizes and positions
