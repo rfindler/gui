@@ -63,6 +63,12 @@
       (update-min-width)
       (refresh))
 
+    (define/private (reorder-items! former-indices)
+      (set-items
+       (for/list ([old (in-list former-indices)]
+                  [i (in-naturals)])
+         (get-item old))))
+
     ;; #t if we are between mouse enter and leave events, #f otherwise
     (define mouse-entered? #f)
     (define/private (set-mouse-entered? nv)
@@ -117,7 +123,7 @@
         (set! mouse-down-x x)
         (set! mouse-down-y y)
         (refresh)))
-
+  
     ;; ----------
     ;; public api
     
@@ -188,7 +194,9 @@
       (define close-circle-color
         (cond
           [(and (equal? clicked-in i) (not clicked-in-offset))
-           (mouse-down-over-close-circle-color)]
+           (if mouse-over-close?
+               (mouse-down-over-close-circle-color)
+               (mouse-over-close-circle-color))]
           [(and (equal? mouse-over i) mouse-over-close?)
            (mouse-over-close-circle-color)]
           [else tab-background-color]))
@@ -295,7 +303,8 @@
       (define the-callback void)
 
       (cond
-        [(send evt leaving?)
+        [(and (send evt leaving?)
+              (not (send evt get-left-down)))
          (set-mouse-over #f #f)
          (set-mouse-down-xy #f #f)
          (set-mouse-entered? #f)
@@ -315,26 +324,30 @@
                      (callback this
                                (new control-event%
                                     [event-type 'tab-panel]
-                                    [time-stamp (send evt get-time-stamp)])))))
+                                    [time-stamp (send evt get-time-stamp)]))))))
            (set-mouse-down-xy (send evt get-x) (send evt get-y))
            (set-clicked-in mouse-over (and (not mouse-over-close?) mx-offset-in-tab))
            (set-mouse-over #f #f)]
           [(send evt dragging?)
            (set-mouse-down-xy (send evt get-x) (send evt get-y))
-           (set-mouse-over #f #f)]
+           (set-mouse-over #f (and mouse-over-close?
+                                   (eqv? clicked-in mouse-over)))]
           [(send evt button-up?)
            (when clicked-in
-             clicked-in-offset
              (cond
                [clicked-in-offset
+                (define former-indices (reordered-list (number-of-items) clicked-in mouse-over))
+                (reorder-items! former-indices)
                 (set! the-callback
                       (λ ()
-                        (on-reorder 'former-indicies)))]
+                        (on-reorder former-indices)))]
                [else
-                (when mouse-over-close?
+                (when (and mouse-over-close?
+                           (eqv? clicked-in mouse-over))
+                  (define index clicked-in)
                   (set! the-callback
                         (λ ()
-                          (on-close-request 'index))))]))
+                          (on-close-request index))))]))
            (set-mouse-down-xy #f #f)
            (set-clicked-in #f #f)
            (set-mouse-over mouse-over mouse-over-close?)]
@@ -528,12 +541,31 @@
                                       (cons 1 "b")
                                       (cons 2 "c"))))))
 
+;; computes mapping of new index to old index when
+;; clicked-in is dragged to mouse-over
+(define (reordered-list number-of-items clicked-in mouse-over)
+  (for/list ([i (in-range number-of-items)])
+    (cond
+      [(or (i . < . (min clicked-in mouse-over))
+           (i . > . (max clicked-in mouse-over)))
+       i]
+      [(= i mouse-over) clicked-in]
+      [(clicked-in . < . mouse-over) (add1 i)]
+      [else (sub1 i)])))
+
+(module+ test
+  (check-equal? (reordered-list 1 0 0) '(0))
+  (check-equal? (reordered-list 5 2 3) '(0 1 3 2 4))
+  (check-equal? (reordered-list 5 3 2) '(0 1 3 2 4))
+  (check-equal? (reordered-list 6 2 5) '(0 1 3 4 5 2))
+  (check-equal? (reordered-list 6 5 1) '(0 5 1 2 3 4)))
+
 (module+ main
   (require (only-in racket/gui/base frame% canvas%))
   (define f (new frame% [label ""] [width 300] [height 80]))
   (define tpc (new tab-panel-control% [parent f]
                    [callback (λ x (printf "callback\n"))]
                    [on-close-request (λ x (printf "on-close-request\n"))]
-                   [on-reorder (λ x (printf "on-reorder\n"))]
+                   [on-reorder (λ (x) (printf "on-reorder ~s\n" x))]
                    [choices '("a" "b" "abcdefghijklmnopqrstuvwxyz" "d" "e")]))
   (send f show #t))
