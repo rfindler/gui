@@ -1,7 +1,9 @@
 #lang racket/base
 (require (prefix-in r/b: racket/base)
          racket/draw
-         (only-in racket/gui/base normal-control-font canvas%)
+         (only-in racket/gui/base
+                  normal-control-font canvas%
+                  control-event%)
          racket/class
          mred/private/panel-wob)
 (module+ test (require rackunit))
@@ -12,7 +14,11 @@
   (class canvas%
     (inherit refresh get-dc get-client-size min-height min-width
              stretchable-height)
-    (init choices [callback void] [style '()] [font normal-control-font])
+    (init choices)
+    (init-field [callback void])
+    (init [style '()] [font normal-control-font])
+    (init-field [on-close-request void]
+                [on-reorder void])
     (super-new [style (r/b:append
                        (if (member 'deleted style)
                            '(style)
@@ -25,6 +31,10 @@
     ;; (or/c #f (integer-in 0 (hash-count items)))
     ;; the currently selected tab
     (define selection #f)
+    (define/private (set-the-selection s)
+      (unless (equal? selection s)
+        (set! selection s)
+        (refresh)))
     
     ;; hash[natural -o> string]
     ;; indicates the strings on each of the tab items
@@ -85,7 +95,7 @@
     ;; (or/c #f natural?)
     ;; indicates the offset from the start where the
     ;; clicked-in tab was first clicked in or that
-    ;; the close button was clicked on.
+    ;; the close button was clicked on (when it is #f)
     ;; this is meaningful only if clicked-in is not #f
     (define clicked-in-offset #f)
 
@@ -120,14 +130,14 @@
       (delete-item n)
       (refresh))
       
-    (define/public (get-item-label n) (void))
+    (define/public (get-item-label n) (get-item n))
     (define/public (get-number) (number-of-items))
     (define/public (get-selection) selection)
     (define/public (set new-choices)
       (set-items new-choices)
       (refresh))
-    (define/public (set-item-label n label) (void))
-    (define/public (set-selection n) (void))
+    (define/public (set-item-label n label) (set-item n label))
+    (define/public (set-selection n) (set-the-selection n))
         
     ;; ----------
     ;; drawing
@@ -282,6 +292,8 @@
     ;; mouse movement
 
     (define/override (on-event evt)
+      (define the-callback void)
+
       (cond
         [(send evt leaving?)
          (set-mouse-over #f #f)
@@ -296,6 +308,14 @@
           (mouse->tab (send evt get-x) (send evt get-y)))
         (cond
           [(send evt button-down?)
+           (when (and mouse-over (not mouse-over-close?))
+             (set-the-selection
+             (set! the-callback
+                   (λ ()
+                     (callback this
+                               (new control-event%
+                                    [event-type 'tab-panel]
+                                    [time-stamp (send evt get-time-stamp)])))))
            (set-mouse-down-xy (send evt get-x) (send evt get-y))
            (set-clicked-in mouse-over (and (not mouse-over-close?) mx-offset-in-tab))
            (set-mouse-over #f #f)]
@@ -303,11 +323,26 @@
            (set-mouse-down-xy (send evt get-x) (send evt get-y))
            (set-mouse-over #f #f)]
           [(send evt button-up?)
+           (when clicked-in
+             clicked-in-offset
+             (cond
+               [clicked-in-offset
+                (set! the-callback
+                      (λ ()
+                        (on-reorder 'former-indicies)))]
+               [else
+                (when mouse-over-close?
+                  (set! the-callback
+                        (λ ()
+                          (on-close-request 'index))))]))
            (set-mouse-down-xy #f #f)
            (set-clicked-in #f #f)
            (set-mouse-over mouse-over mouse-over-close?)]
           [else
-           (set-mouse-over mouse-over mouse-over-close?)])))
+           (set-mouse-over mouse-over mouse-over-close?)]))
+
+
+      (the-callback))
 
     ;; -----
     ;; sizes and positions
@@ -497,5 +532,8 @@
   (require (only-in racket/gui/base frame% canvas%))
   (define f (new frame% [label ""] [width 300] [height 80]))
   (define tpc (new tab-panel-control% [parent f]
+                   [callback (λ x (printf "callback\n"))]
+                   [on-close-request (λ x (printf "on-close-request\n"))]
+                   [on-reorder (λ x (printf "on-reorder\n"))]
                    [choices '("a" "b" "abcdefghijklmnopqrstuvwxyz" "d" "e")]))
   (send f show #t))
