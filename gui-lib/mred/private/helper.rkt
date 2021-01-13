@@ -9,6 +9,7 @@
                     non-negative-number?
                     same-dimension?
                     list-diff
+                    elements-same?
                     key-regexp
                     do-command
                     double-boxed
@@ -68,6 +69,16 @@
 	   [(hash-table-get table (car l) (lambda () #f))
 	    (loop (cdr l))]
 	   [else (cons (car l) (loop (cdr l)))])))))
+
+  ;; elements-same? : (listof object?) (listof object?) -> boolean?
+  (define (elements-same? l1 l2)
+    (let loop ([l1 l1] [l2 l2])
+      (cond
+        [(and (null? l1) (null? l2)) #t]
+        [(and (pair? l1) (pair? l2))
+         (and (object=? (car l1) (car l2))
+              (loop (cdr l1) (cdr l2)))]
+        [else #f])))
 
   (define (key-regexp c)
     (regexp (format "(^|[^&])&[~a~a]" (char-downcase c) (char-upcase c))))

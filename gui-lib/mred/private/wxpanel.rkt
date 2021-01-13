@@ -220,19 +220,20 @@
                                          "cannot delete non-window area"
                                          "area" non-window
                                          "container" (wx->proxy this))))
-              
-              ;; Newly-added children may have been removed when
-              ;;  disabled, or now added into a disabled panel:
-              (for-each (lambda (child) (send child queue-active))
-                        added-children)
 
-              (let ([top (get-top-level)])
-                (for-each (lambda (child) (send top show-child child #f))
-                          removed-children)
-                (set! children new-children)
-                (force-redraw)
-                (for-each (lambda (child) (send top show-child child #t))
-                          added-children)))))]
+              (unless (elements-same? new-children children)
+                ;; Newly-added children may have been removed when
+                ;;  disabled, or now added into a disabled panel:
+                (for-each (lambda (child) (send child queue-active))
+                          added-children)
+
+                (let ([top (get-top-level)])
+                  (for-each (lambda (child) (send top show-child child #f))
+                            removed-children)
+                  (set! children new-children)
+                  (force-redraw)
+                  (for-each (lambda (child) (send top show-child child #t))
+                            added-children))))))]
 		 
        ;; delete-child: removes a child from the panel.
        ;; input: child: child to delete.
